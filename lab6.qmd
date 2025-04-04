@@ -1,0 +1,213 @@
+---
+title: "lab6"
+author: "Sarah Culhane"
+format: html
+execute:
+ echo: true
+---
+
+## Question 1
+
+```{r}
+root  <- 'https://gdex.ucar.edu/dataset/camels/file'
+download.file('https://gdex.ucar.edu/dataset/camels/file/camels_attributes_v2.0.pdf', 
+              'data/camels_attributes_v2.0.pdf')
+types <- c("clim", "geol", "soil", "topo", "vege", "hydro")
+# Where the files live online ...
+remote_files  <- glue('{root}/camels_{types}.txt')
+# where we want to download the data ...
+local_files   <- glue('data/camels_{types}.txt')
+walk2(remote_files, local_files, download.file, quiet = TRUE)
+# Read and merge data
+camels <- map(local_files, read_delim, show_col_types = FALSE) 
+camels <- power_full_join(camels ,by = 'gauge_id')
+```
+
+First, I downloaded all the necessary data into my data directory. From the documentation PDF, I was able to figure out that zero_q_freq represents the percentage of days within a given period during which the stream flow (Q) is zero, indicating no flow conditions.
+
+# Question 2
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(ggthemes)  # For theme_map
+library(patchwork) # To combine plots
+
+# Create the first map colored by aridity
+map_aridity <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
+  borders("state", colour = "gray50") +
+  geom_point(aes(color = aridity), size = 2) +
+  scale_color_gradient(low = "lightyellow", high = "darkred") +
+  ggthemes::theme_map() +
+  labs(title = "Site Map Colored by Aridity",
+       color = "Aridity Index",
+       x = "Longitude",
+       y = "Latitude")
+
+# Create the second map colored by p_mean
+map_p_mean <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
+  borders("state", colour = "gray50") +
+  geom_point(aes(color = p_mean), size = 2) +
+  scale_color_gradient(low = "lightblue", high = "navy") +
+  ggthemes::theme_map() +
+  labs(title = "Site Map Colored by Precipitation Mean",
+       color = "Mean Precip. (p_mean)",
+       x = "Longitude",
+       y = "Latitude")
+
+# Combine the two plots using patchwork
+map_aridity + map_p_mean
+
+```
+
+I used the code above to make 2 maps of the sites, colored by aridity and the p_mean column.
+
+# Question 3
+
+```{r}
+#run code so far
+
+# Define model
+lm_model <- linear_reg() %>%
+  # define the engine
+  set_engine("lm") %>%
+  # define the mode
+  set_mode("regression")
+
+# Instantiate a workflow ...
+lm_wf <- workflow() %>%
+  # Add the recipe
+  add_recipe(rec) %>%
+  # Add the model
+  add_model(lm_model) %>%
+  # Fit the model to the training data
+  fit(data = camels_train) 
+
+# Extract the model coefficients from the workflow
+summary(extract_fit_engine(lm_wf))$coefficients
+
+
+#make a xboost(engine) regression (mode) model using boost_tree
+xgb_model <- boost_tree() %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+#Build a neural network model using the nnet engine from the baguette package using the bag_mlp function
+nn_model <- bag_mlp() %>%
+  set_engine("nnet") %>%
+  set_mode("regression")
+#work it into workflow from lab instructions
+wf <- workflow_set(
+  list(rec),
+  list(lm_model, rf_model, xgb_model, nn_model)
+) %>%
+  workflow_map('fit_resamples', resamples = camels_cv)
+#evaluate results
+autoplot(wf)
+rank_results(wf, rank_metric = "rsq", select_best = TRUE)
+
+
+```
+
+Looking at the workflow rank result, it looks like the neutral network model outperforming the rand_forest model and the linear_reg model but the xgboost regression model is under performing all other models in the R-squared metric. Going forward, I would use the neutral network model.
+
+# Question 4
+
+part 1: Data Splitting
+
+```{r}
+camels |> 
+  select(aridity, p_mean, elev_mean) |> 
+  drop_na()
+set.seed(123) #set seed for reproducibility 
+split <- initial_split(camels, prop = 0.75) #Create an initial split with 75% used for training and 25% for testing
+camels_train <- training(split)
+camels_test <- testing(split) # extract training and testing sets
+camels_cv <- vfold_cv(camels_train, v = 10) # build a 10-fold CV dataset as well
+```
+
+part 2: Recipe
+
+```{r}
+formula <- logQmean ~ aridity + p_mean + elev_mean  # create a forumula
+rec <- recipe(formula, data = camels_train) %>% # build a recipe
+  step_naomit(all_predictors(), all_outcomes()) %>%
+  step_normalize(all_predictors())
+```
+
+I used this formula because predictors like aridity, precipitation, and elevation generally play a significant role in stream flow prediction.
+
+part 3: define 3 models
+
+```{r}
+# create a random forest model
+rf_model <- rand_forest() %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+# create a neural network model
+nn_model <- bag_mlp() %>%
+  set_engine("nnet") %>%
+  set_mode("regression")
+# create a XGBoost Model
+xgb_model <- boost_tree() %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+```
+
+Step 4: create a workflow set
+
+```{r}
+model_list <- list(rf = rf_model, xgb = xgb_model, nn = nn_model)
+wf_set <- workflow_set( #create a workflow object
+  preproc = list(rec), #add recipe
+  models = model_list #add models
+)
+
+# Fit resamples
+set.seed(123)
+wf_fit <- workflow_map(wf_set, "fit_resamples", resamples = camels_cv)
+```
+
+step 5: evaluation
+
+```{r}
+autoplot(wf_fit) # use autoplot
+
+rank_results(wf_fit, rank_metric = "rsq", select_best = TRUE) # use rank_results to compare the models
+
+```
+
+I think the rand_forest model would be best because it has the highest R-squared value, suggesting a strong model fit.
+
+step 6: exact and evaluate
+
+```{r}
+best_model <- workflow() %>%
+  add_model(rf_model) %>%
+  add_recipe(rec) %>%
+  fit(data = camels_train)
+
+# Make predictions
+test_preds <- augment(best_model, new_data = camels_test)
+
+# Evaluate
+metrics(test_preds, truth = logQmean, estimate = .pred)
+
+#visualization
+library(ggplot2)
+
+ggplot(test_preds, aes(x = logQmean, y = .pred, color = aridity)) +
+  geom_point() +
+  geom_abline(lty = 2, color = "gray") +
+  scale_color_viridis_c() +
+  labs(
+    title = "Observed vs Predicted Streamflow",
+    x = "Observed logQmean",
+    y = "Predicted logQmean",
+    color = "Aridity Index"
+  ) +
+  theme_minimal()
+
+
+```
+
+The results make sense to me, and based on the table the predictions are generally pretty accurate to observed stream flow, which is pretty neat. I also see that more arid regions tend to have a lower overall stream flow and are harder to predict. I based this assumption off the fact that the data is more spread out as the aridity index decreases.
