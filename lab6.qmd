@@ -68,6 +68,20 @@ I used the code above to make 2 maps of the sites, colored by aridity and the p_
 
 ```{r}
 #run code so far
+set.seed(123)
+# Bad form to perform simple transformations on the outcome variable within a 
+# recipe. So, we'll do it here.
+camels <- camels |> 
+  mutate(logQmean = log(q_mean))
+
+# Generate the split
+camels_split <- initial_split(camels, prop = 0.8)
+camels_train <- training(camels_split)
+camels_test  <- testing(camels_split)
+
+camels_cv <- vfold_cv(camels_train, v = 10)
+
+#preprocess recipe
 # Create a recipe to preprocess the data
 rec <-  recipe(logQmean ~ aridity + p_mean, data = camels_train) %>%
   # Log transform the predictor variables (aridity and p_mean)
@@ -76,6 +90,21 @@ rec <-  recipe(logQmean ~ aridity + p_mean, data = camels_train) %>%
   step_interact(terms = ~ aridity:p_mean) |> 
   # Drop any rows with missing values in the pred
   step_naomit(all_predictors(), all_outcomes())
+
+# Prepare the data
+baked_data <- prep(rec, camels_train) |> 
+  bake(new_data = NULL)
+
+# Interaction with lm
+#  Base lm sets interaction terms with the * symbol
+lm_base <- lm(logQmean ~ aridity * p_mean, data = baked_data)
+summary(lm_base)
+
+# Sanity Interaction term from recipe ... these should be equal!!
+summary(lm(logQmean ~ aridity + p_mean + aridity_x_p_mean, data = baked_data))
+
+test_data <-  bake(prep(rec), new_data = camels_test)
+test_data$lm_pred <- predict(lm_base, newdata = test_data)
 
 
 #make a xboost(engine) regression (mode) model using boost_tree
@@ -99,7 +128,7 @@ rank_results(wf, rank_metric = "rsq", select_best = TRUE)
 
 ```
 
-Looking at the workflow rank result, it looks like the neutral rand_forest model outperformed the xgboost model and the neutral network model. It looks like both models outperformed the linear_reg model. Going forward, I would use the rand_forest model.
+Looking at the workflow rank result, it looks like neutral network outperformed the linear_reg model and the rand_forest model while the xgboost model underperformed. Going forward, I would use the neutral network model since it has the highest R squared
 
 # Question 4
 
