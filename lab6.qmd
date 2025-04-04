@@ -46,17 +46,17 @@ library(patchwork)
 map_aridity <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
   borders("state", colour = "gray50") +
   geom_point(aes(color = aridity)) +
-  scale_color_viridis_c(option = "magma") + 
-  labs(title = "Map of Sites by Aridity", x = "Longitude", y = "Latitude", color = "Aridity") +
-  theme_minimal()
+  scale_color_gradient(low = "yellow", high = "red") +
+  labs(title = "map by aridity") +
+  ggthemes::theme_map()
 
 # create map colored by mean precipitation 
 map_p_mean <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
   borders("state", colour = "gray50") +
   geom_point(aes(color = p_mean)) +
-  scale_color_viridis_c(option = "plasma") + 
-  labs(title = "Map of Sites by Mean Precipitation", x = "Longitude", y = "Latitude", color = "Mean Precip.") +
-  theme_minimal()
+  scale_color_gradient(low = "beige", high = "navy") +
+  labs(title = "map by mean precipitation") +
+  ggthemes::theme_map()
 
 # Combine the two maps side by side using patchwork
 map_aridity + map_p_mean
