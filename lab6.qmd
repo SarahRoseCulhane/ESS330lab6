@@ -67,6 +67,15 @@ I used the code above to make 2 maps of the sites, colored by aridity and the p_
 # Question 3
 
 ```{r}
+#run code so far
+# Create a recipe to preprocess the data
+rec <-  recipe(logQmean ~ aridity + p_mean, data = camels_train) %>%
+  # Log transform the predictor variables (aridity and p_mean)
+  step_log(all_predictors()) %>%
+  # Add an interaction term between aridity and p_mean
+  step_interact(terms = ~ aridity:p_mean) |> 
+  # Drop any rows with missing values in the pred
+  step_naomit(all_predictors(), all_outcomes())
 
 
 #make a xboost(engine) regression (mode) model using boost_tree
