@@ -9,7 +9,7 @@ execute:
 ## Question 1
 
 ```{r}
-#load neccessary dataset
+#load neccessary libraries
 library(tidyverse)
 library(tidymodels)
 library(powerjoin)
@@ -17,6 +17,7 @@ library(glue)
 library(vip)
 library(baguette)
 
+#download all data and PDF
 root  <- 'https://gdex.ucar.edu/dataset/camels/file'
 download.file('https://gdex.ucar.edu/dataset/camels/file/camels_attributes_v2.0.pdf', 
               'data/camels_attributes_v2.0.pdf')
@@ -37,11 +38,11 @@ First, I downloaded all the necessary data into my data directory. From the docu
 
 ```{r}
 
-# Clibrary(ggplot2)
+# load neccessary library(ggplot2)
 library(ggthemes)
 library(patchwork)
 
-# Map colored by aridity
+# create map colored by aridity
 map_aridity <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
   borders("state", colour = "gray50") +
   geom_point(aes(color = aridity)) +
@@ -49,7 +50,7 @@ map_aridity <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
   labs(title = "Map of Sites by Aridity", x = "Longitude", y = "Latitude", color = "Aridity") +
   theme_minimal()
 
-# Map colored by mean precipitation (p_mean)
+# create map colored by mean precipitation 
 map_p_mean <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
   borders("state", colour = "gray50") +
   geom_point(aes(color = p_mean)) +
@@ -67,7 +68,7 @@ I used the code above to make 2 maps of the sites, colored by aridity and the p_
 # Question 3
 
 ```{r}
-#run code so far
+#run code so far from lab instructions
 set.seed(123)
 # Bad form to perform simple transformations on the outcome variable within a 
 # recipe. So, we'll do it here.
@@ -82,6 +83,7 @@ camels_test  <- testing(camels_split)
 camels_cv <- vfold_cv(camels_train, v = 10)
 
 #preprocess recipe
+
 # Create a recipe to preprocess the data
 rec <-  recipe(logQmean ~ aridity + p_mean, data = camels_train) %>%
   # Log transform the predictor variables (aridity and p_mean)
@@ -96,6 +98,7 @@ baked_data <- prep(rec, camels_train) |>
   bake(new_data = NULL)
 
 # Interaction with lm
+
 #  Base lm sets interaction terms with the * symbol
 lm_base <- lm(logQmean ~ aridity * p_mean, data = baked_data)
 summary(lm_base)
@@ -138,6 +141,7 @@ rf_wf <- workflow() %>%
   # Fit the model
   fit(data = camels_train) 
 
+# part 2 question code
 
 #make a xboost(engine) regression (mode) model using boost_tree
 xgb_model <- boost_tree() %>%
@@ -230,7 +234,7 @@ rank_results(wf_fit, rank_metric = "rsq", select_best = TRUE) # use rank_results
 
 ```
 
-I think the rand_forest model would be best because it has the highest R-squared value, suggesting a strong model fit.
+I think the rand_forest model would be best because it has the highest R-squared value, suggesting the strongest model fit.
 
 step 6: exact and evaluate
 
