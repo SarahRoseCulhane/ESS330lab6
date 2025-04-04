@@ -9,6 +9,14 @@ execute:
 ## Question 1
 
 ```{r}
+#load neccessary dataset
+library(tidyverse)
+library(tidymodels)
+library(powerjoin)
+library(glue)
+library(vip)
+library(baguette)
+
 root  <- 'https://gdex.ucar.edu/dataset/camels/file'
 download.file('https://gdex.ucar.edu/dataset/camels/file/camels_attributes_v2.0.pdf', 
               'data/camels_attributes_v2.0.pdf')
@@ -28,37 +36,28 @@ First, I downloaded all the necessary data into my data directory. From the docu
 # Question 2
 
 ```{r}
-# Load necessary libraries
-library(tidyverse)
-library(tidymodels)
-library(powerjoin)
-library(glue)
-library(vip)
-library(baguette)
 
-# Create the first map colored by aridity
+# Clibrary(ggplot2)
+library(ggthemes)
+library(patchwork)
+
+# Map colored by aridity
 map_aridity <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
   borders("state", colour = "gray50") +
-  geom_point(aes(color = aridity), size = 2) +
-  scale_color_gradient(low = "lightyellow", high = "darkred") +
-  ggthemes::theme_map() +
-  labs(title = "Site Map Colored by Aridity",
-       color = "Aridity Index",
-       x = "Longitude",
-       y = "Latitude")
+  geom_point(aes(color = aridity)) +
+  scale_color_viridis_c(option = "magma") + 
+  labs(title = "Map of Sites by Aridity", x = "Longitude", y = "Latitude", color = "Aridity") +
+  theme_minimal()
 
-# Create the second map colored by p_mean
+# Map colored by mean precipitation (p_mean)
 map_p_mean <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
   borders("state", colour = "gray50") +
-  geom_point(aes(color = p_mean), size = 2) +
-  scale_color_gradient(low = "lightblue", high = "navy") +
-  ggthemes::theme_map() +
-  labs(title = "Site Map Colored by Precipitation Mean",
-       color = "Mean Precip. (p_mean)",
-       x = "Longitude",
-       y = "Latitude")
+  geom_point(aes(color = p_mean)) +
+  scale_color_viridis_c(option = "plasma") + 
+  labs(title = "Map of Sites by Mean Precipitation", x = "Longitude", y = "Latitude", color = "Mean Precip.") +
+  theme_minimal()
 
-# Combine the two plots using patchwork
+# Combine the two maps side by side using patchwork
 map_aridity + map_p_mean
 
 ```
@@ -111,7 +110,7 @@ rank_results(wf, rank_metric = "rsq", select_best = TRUE)
 
 ```
 
-Looking at the workflow rank result, it looks like the neutral network model outperforming the rand_forest model and the linear_reg model but the xgboost regression model is under performing all other models in the R-squared metric. Going forward, I would use the neutral network model.
+Looking at the workflow rank result, it looks like the neutral rand_forest model outperformed the xgboost model and the neutral network model. It looks like both models outperformed the linear_reg model. Going forward, I would use the rand_forest model.
 
 # Question 4
 
@@ -122,6 +121,8 @@ camels |>
   select(aridity, p_mean, elev_mean) |> 
   drop_na()
 set.seed(123) #set seed for reproducibility 
+camels <- camels |> 
+  mutate(logQmean = log(q_mean))
 split <- initial_split(camels, prop = 0.75) #Create an initial split with 75% used for training and 25% for testing
 camels_train <- training(split)
 camels_test <- testing(split) # extract training and testing sets
@@ -131,7 +132,7 @@ camels_cv <- vfold_cv(camels_train, v = 10) # build a 10-fold CV dataset as well
 part 2: Recipe
 
 ```{r}
-formula <- logQmean ~ aridity + p_mean + elev_mean  # create a forumula
+formula <- logQmean ~ aridity + p_mean + elev_mean  
 rec <- recipe(formula, data = camels_train) %>% # build a recipe
   step_naomit(all_predictors(), all_outcomes()) %>%
   step_normalize(all_predictors())
