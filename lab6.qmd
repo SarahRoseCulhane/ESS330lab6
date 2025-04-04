@@ -29,9 +29,12 @@ First, I downloaded all the necessary data into my data directory. From the docu
 
 ```{r}
 # Load necessary libraries
-library(ggplot2)
-library(ggthemes)  # For theme_map
-library(patchwork) # To combine plots
+library(tidyverse)
+library(tidymodels)
+library(powerjoin)
+library(glue)
+library(vip)
+library(baguette)
 
 # Create the first map colored by aridity
 map_aridity <- ggplot(data = camels, aes(x = gauge_lon, y = gauge_lat)) +
