@@ -106,6 +106,25 @@ summary(lm(logQmean ~ aridity + p_mean + aridity_x_p_mean, data = baked_data))
 test_data <-  bake(prep(rec), new_data = camels_test)
 test_data$lm_pred <- predict(lm_base, newdata = test_data)
 
+# Define model
+lm_model <- linear_reg() %>%
+  # define the engine
+  set_engine("lm") %>%
+  # define the mode
+  set_mode("regression")
+
+# Instantiate a workflow ...
+lm_wf <- workflow() %>%
+  # Add the recipe
+  add_recipe(rec) %>%
+  # Add the model
+  add_model(lm_model) %>%
+  # Fit the model to the training data
+  fit(data = camels_train) 
+
+# Extract the model coefficients from the workflow
+summary(extract_fit_engine(lm_wf))$coefficients
+
 
 #make a xboost(engine) regression (mode) model using boost_tree
 xgb_model <- boost_tree() %>%
