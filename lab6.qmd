@@ -125,6 +125,19 @@ lm_wf <- workflow() %>%
 # Extract the model coefficients from the workflow
 summary(extract_fit_engine(lm_wf))$coefficients
 
+library(baguette)
+rf_model <- rand_forest() %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("regression")
+
+rf_wf <- workflow() %>%
+  # Add the recipe
+  add_recipe(rec) %>%
+  # Add the model
+  add_model(rf_model) %>%
+  # Fit the model
+  fit(data = camels_train) 
+
 
 #make a xboost(engine) regression (mode) model using boost_tree
 xgb_model <- boost_tree() %>%
