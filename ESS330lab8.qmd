@@ -19,6 +19,8 @@ library(baguette)
 
 **Data Import/Tidy/Transform**
 
+First, I read in the data using map, `map`, `read_delim()` and `powerjoin::power_full_join().`
+
 ```{r}
 #download all data and PDF
 root  <- 'https://gdex.ucar.edu/dataset/camels/file'
