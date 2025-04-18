@@ -50,6 +50,10 @@ camels_clean <- camels %>%
 # remove remaining missing values
 camels_clean <- camels_clean %>%
   drop_na()
+# keep guage_lat and guage_lon for later
+camels_clean <- camels_clean %>%
+  select(q_mean, everything(), gauge_lat, gauge_lon)
+
 # Quick visualization of q_mean
 ggdensity(camels_clean$q_mean, 
           main = "Density plot of Mean Streamflow (q_mean)", 
@@ -62,8 +66,7 @@ Then, I split the data into a training and testing set
 
 ```{r}
 set.seed(123)
-camels_clean <- camels_clean %>%
-  mutate(logQmean = log(q_mean))
+camels_clean <- camels_clean 
 
 camels_split <- initial_split(camels_clean, prop = 0.8)
 camels_train <- training(camels_split)
@@ -72,22 +75,19 @@ camels_test <- testing(camels_split)
 
 # Feature Engineering
 
-Then, I created a recipe
+Then, I created a recipe using aridity and p_mean as the predictors, cleaning up the data 
 
 ```{r}
 library(tidymodels)
 
-rec <-  recipe(logQmean ~ aridity + p_mean, data = camels_train) %>%
+# Create a recipe to preprocess the data
+rec <-  recipe(q_mean ~ aridity + p_mean, data = camels_train) %>%
   # Log transform the predictor variables (aridity and p_mean)
   step_log(all_predictors()) %>%
   # Add an interaction term between aridity and p_mean
   step_interact(terms = ~ aridity:p_mean) |> 
   # Drop any rows with missing values in the pred
   step_naomit(all_predictors(), all_outcomes())
-
-# Prepare the data
-baked_data <- prep(rec, camels_train) |> 
-  bake(new_data = NULL)
 ```
 
 # Resampling and Model Testing
@@ -103,72 +103,79 @@ baked_data <- prep(rec, camels_train) |>
 2.  Build Candidate Models
 
     ```{r}
-    lm_model <- linear_reg(penalty = 0.1, mixture = 0) %>%
-      set_engine("glmnet")
+  # Linear regression model
+lin_mod <- linear_reg() %>%
+  set_engine("lm") %>%
+  set_mode("regression")
 
-    rf_model <- rand_forest(mtry = 5, trees = 500) %>%
-      set_engine("ranger") %>%
-      set_mode("regression")
+# Random forest model
+rf_mod <- rand_forest(trees = 500) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
 
-    xgb_model <- boost_tree(trees = 500, learn_rate = 0.1) %>%
-      set_engine("xgboost") %>%
-      set_mode("regression")
+# Boosted tree model
+xgb_mod <- boost_tree(trees = 500, learn_rate = 0.1) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
 
     ```
 
-<!-- -->
 
-2.  Test the models
+
+3.  Test the models
 
 ```{r}
-models <- list(
-  "Linear Regression" = lm_model,
-  "Random Forest" = rf_model,
-  "XGBoost" = xgb_model
+# Create a named list of models
+model_list <- list(
+  linear_regression = lin_mod,
+  random_forest = rf_mod,
+  boosted_tree = xgb_mod
 )
 
+# Create the workflow set
 wf_set <- workflow_set(
-  preproc = list("recipe" = rec),
-  models = models
+  preproc = list(rec),
+  models = model_list
 )
 
+# Fit models across resamples
+set.seed(123)
 wf_results <- wf_set %>%
-  workflow_map("fit_resamples", resamples = camels_cv)
-
-autoplot(wf_results) #use auotplot to visualize the results of the workflow set
+  workflow_map(resamples = camels_cv, metrics = metric_set(rmse, rsq), seed = 123)
 ```
-
+Then, I used autoplot ot visualize the results of the workflow set
 ```{r}
-rank_results(wf_results, rank_metric = "rsq", select_best = TRUE)
+autoplot(wf_results)
+
 ```
 
 4\. Model Selection
 
-Based on the visualized metrics, I am going to use the random forest model. This model outperformed the other models, ranking as the number one model when using the rank_results() function and the autoplot function. Looking at it, it also had the highest rsq. and the lowest rmse, supporting the outputted table. 
+Based on the visualized metrics, I am going to use the random forest model. This model outperformed the other models, ranking as the number one model when using the rank_results() function and the autoplot function. Looking at it, it also had the highest rsq. and the lowest rmse, supporting the outputted table. The model I selected is an ensemble learning method model type with multiple engine types. The most popular ones are the randomForest engine and the Ranger engine. The two common modes are classification and regression. For this one, I am using regression.
 
 # Model Tuning
 
 1.  Build a model for chosen specification
 
     ```{r}
-library(tidymodels)
-
-rf_model_tune <- rand_forest(
-  mtry = tune(),      # Number of predictors to try at each split
-  min_n = tune(),     # Minimum node size before a split
-  trees = 500         # Fixed number of trees
+# Define a tunable random forest model
+rf_tune_mod <- rand_forest(
+  mtry = tune(),
+  min_n = tune(),
 ) %>%
   set_engine("ranger") %>%
   set_mode("regression")
+
 
     ```
 
 2.  Create a workflow
 
     ```{r}
-   wf_tune <- workflow() %>%
-  add_model(rf_model_tune) %>%
-  add_recipe(rec)   # Replace with your actual recipe object name
+  # Build a workflow with the tunable random forest model and the recipe
+rf_tune_workflow <- workflow() %>%
+  add_model(rf_tune_mod) %>%
+  add_recipe(rec)
 
     ```
 
@@ -179,61 +186,97 @@ rf_model_tune <- rand_forest(
     first, I extracted the tunable parameters. Then I used the dials\$object slot to see the tunable parameters and their ranges
 
     ```{r}
-  dials <- extract_parameter_set_dials(wf_tune)
-dials$object  # View the ranges and types of each parameter
+# Extract tunable parameter set from the workflow
+dials <- extract_parameter_set_dials(rf_tune_workflow)
+
+# View the parameters and their default ranges
+dials$object 
 
     ```
 
 #    4. Define the Search Space
 
 ```{r}
-# Assuming your outcome is q_mean
-final_dials <- dials %>%
-  finalize(select(camels_train, q_mean))
-
-set.seed(123)
-my.grid <- grid_latin_hypercube(
-  final_dials,
-  size = 20  # or 20 as per instructions
+# Finalize the mtry and min_n parameters
+rf_params <- parameters(
+  mtry(),
+  min_n()
 )
+
+# Finalize the parameter grid based on the dataset (using the data from training set)
+rf_params <- finalize(rf_params, training(camels_split))  # Replace camels_split with your training data
+
+# Generate a space-filling grid of hyperparameters (size = 25 combinations)
+grid_values <- grid_space_filling(
+  rf_params,
+  size = 25
+)
+
+
 ```
 
 # 5. Tune the model
 
 ```{r}
-model_params <- tune_grid(
-  wf_tune,
-  resamples = camels_cv,  # Your 10-fold CV object
-  grid = my.grid,
-  metrics = metric_set(rmse, rsq, mae),
-  control = control_grid(save_pred = TRUE)
-)
+model_params <-  tune_grid(
+    rf_tune_workflow,
+    resamples = camels_cv,
+    grid = my.grid,
+    metrics = metric_set(rmse, rsq, mae),
+    control = control_grid(save_pred = TRUE)
+  )
 
-autoplot(model_params)  # Visualize model performance across the grid
-
+autoplot(model_params)
 
 ```
 
 Based on this, I see that
 
 # 6. check the skills of the tuned model
-
 ```{r}
-collect_metrics(model_params)
+# Collect all metrics from the tuned model
+model_metrics <- collect_metrics(model_params)
+
+# View the collected metrics
+model_metrics
+
 ```
-
-Based off what I see,
+I used the code above to collect_metrics() function to check the skill of the tuned model.Based off what I see,
 
 ```{r}
+# Show the best model based on MAE
 show_best(model_params, metric = "mae")
 
 ```
+I used the code above to Use the show_best() function to show the best performing model based on Mean Absolute Error.
+```{r}
+# Select the best hyperparameter set
+hp_best <- select_best(model_params, metric = "mae")
+
+# View the best hyperparameter set
+hp_best
+
+```
+I used the code above to save the best performing hyperparameter set to an object called hp_best.
 
 # 7. Finalize your model
 
 ```{r}
-best_mae <- select_best(model_params, metric = "mae")
-final_wf <- finalize_workflow(wf_tune, best_mae)
+# Finalize the workflow with the best hyperparameters
+final_rf_workflow <- finalize_workflow(
+  rf_tune_workflow,  # Original workflow
+  hp_best            # Best hyperparameters obtained from tune_grid
+)
+
+# View the finalized workflow
+final_rf_workflow
+
+# Fit the final model on the full training data
+final_rf_model <- fit(final_rf_workflow, data = training(camels_split))  # Replace with your actual training data
+
+# View the final fitted model
+final_rf_model
+
 ```
 
 # 8. Final Model Verification
