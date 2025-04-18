@@ -15,6 +15,10 @@ library(powerjoin)
 library(glue)
 library(vip)
 library(baguette)
+library(tidyverse)
+library(naniar)
+library(ggpubr)
+
 ```
 
 **Data Import/Tidy/Transform**
@@ -37,4 +41,149 @@ camels <- map(local_files, read_delim, show_col_types = FALSE)
 camels <- power_full_join(camels ,by = 'gauge_id')
 ```
 
-## 
+Then, I cleaned and explored the data to ensure that it is a good fit for modeling.
+
+```{r}
+# Initial cleaning: remove NA rows and filter out incomplete cases
+camels_clean <- camels %>%
+  drop_na(q_mean)
+# Skim for EDA
+skim(camels_clean)
+# remove remaining missing values
+camels_clean <- camels_clean %>%
+  drop_na()
+# Quick visualization of q_mean
+ggdensity(camels_clean$q_mean, 
+          main = "Density plot of Mean Streamflow (q_mean)", 
+          xlab = "q_mean")
+```
+
+# Data Splitting
+
+Then, I split the data into a training and testing set
+
+```{r}
+set.seed(123)
+camels_clean <- camels_clean %>%
+  mutate(logQmean = log(q_mean))
+
+camels_split <- initial_split(camels_clean, prop = 0.8)
+camels_train <- training(camels_split)
+camels_test <- testing(camels_split)
+```
+
+# Feature Engineering
+
+Then, I created a recipe
+
+```{r}
+library(tidymodels)
+
+rec <- recipe(q_mean ~ ., data = camels_clean) %>%
+  step_rm(gauge_lat, gauge_lon) %>%                   # Remove as predictors
+  step_novel(all_nominal_predictors()) %>%            # Handle unseen levels
+  step_dummy(all_nominal_predictors()) %>%            # Convert factors to dummies
+  step_zv(all_predictors()) %>%
+  step_normalize(all_numeric_predictors())            # Scale numeric features
+
+```
+
+# Resampling and Model Testing
+
+1.  Build resamples
+
+    ```{r}
+    set.seed(123)
+    camels_cv <- vfold_cv(camels_train, v = 10)
+
+    ```
+
+2.  Build Candidate Models
+
+    ```{r}
+    lm_model <- linear_reg(penalty = 0.1, mixture = 0) %>%
+      set_engine("glmnet")
+
+    rf_model <- rand_forest(mtry = 5, trees = 500) %>%
+      set_engine("ranger") %>%
+      set_mode("regression")
+
+    xgb_model <- boost_tree(trees = 500, learn_rate = 0.1) %>%
+      set_engine("xgboost") %>%
+      set_mode("regression")
+
+    ```
+
+<!-- -->
+
+2.  Test the models
+
+```{r}
+models <- list(
+  "Linear Regression" = lm_model,
+  "Random Forest" = rf_model,
+  "XGBoost" = xgb_model
+)
+
+wf_set <- workflow_set(
+  preproc = list("recipe" = rec),
+  models = models
+)
+
+wf_results <- wf_set %>%
+  workflow_map("fit_resamples", resamples = camels_cv)
+
+autoplot(wf_results) #use auotplot to visualize the results of the workflow set
+```
+
+```{r}
+rank_results(wf_results, rank_metric = "rsq", select_best = TRUE)
+```
+
+4\. Model Selection
+
+Based on the visualized metrics, I am going to use the XGBoost model. This model outperformed the other models, ranking as the number one model when using the rank_results() function and the autoplot function. Looking at it, it also had the highest rsq. This model is a boosted trees model type with a xgboost engine. The mode used was regression. This model is performing well for this problem because it is good at handeling non-linear relationships, and streamflow (q_mean) is influenced by complex, variable predictors. It's also a pretty flexible model.
+
+# Model Tuning
+
+1.  Build a model for chosen specification
+
+    ```{r}
+    xgb_tuned_model <- 
+      boost_tree(
+        tree_depth = tune(),
+        learn_rate = tune()
+      ) %>%
+      set_engine("xgboost") %>%
+      set_mode("regression")
+    ```
+
+2.  Create a workflow
+
+    ```{r}
+    xgb_workflow <- workflow() %>%
+      add_model(xgb_tuned_model) %>%
+      add_recipe(rec)
+
+    ```
+
+    I created a workflow
+
+3.  Check the Tunable Values/Ranges
+
+    first, I extracted the tunable parameters. Then I used the dials\$object slot to see the tunable parameters and their ranges
+
+    ```{r}
+    dials <- extract_parameter_set_dials(xgb_workflow) 
+    dials$object
+    ```
+
+#    4. Define the Search Space
+
+```{r}
+library(finetune)  # If not loaded already
+
+my.grid <- grid_latin_hypercube(dials, size = 25)
+```
+
+# 5. Tune the model
