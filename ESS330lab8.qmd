@@ -262,6 +262,27 @@ predicted_all <- augment(final_model_fit, new_data = camels_clean) # Make predic
 predicted_all <- predicted_all %>% #calculate residuals
   mutate(residual = (.pred - q_mean)^2) 
 library(ggplot2)
-# make prediction map
+```
+
+Now, I will create maps
+
+```{r}
+library(ggplot2)
+
+map_pred <- ggplot(predicted_all, aes(x = gauge_lon, y = gauge_lat)) +
+  geom_point(aes(color = .pred), size = 2, alpha = 0.8) +
+  scale_color_viridis_c(name = "Predicted q_mean") +
+  coord_fixed(1.3) +
+  labs(title = "Predicted Mean Streamflow") +
+  theme_minimal()
+map_resid <- ggplot(predicted_all, aes(x = gauge_lon, y = gauge_lat)) +
+  geom_point(aes(color = residual), size = 2, alpha = 0.8) +
+  scale_color_viridis_c(name = "Residual (squared)") +
+  coord_fixed(1.3) +
+  labs(title = "Residuals of Predictions") +
+  theme_minimal()
+library(patchwork)
+
+map_pred + map_resid + plot_annotation(title = "Model Predictions and Residuals Across CONUS")
 
 ```
