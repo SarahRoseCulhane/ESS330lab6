@@ -187,3 +187,81 @@ my.grid <- grid_latin_hypercube(dials, size = 25)
 ```
 
 # 5. Tune the model
+
+```{r}
+model_params <- tune_grid(
+  xgb_workflow,
+  resamples = camels_cv,
+  grid = my.grid,
+  metrics = metric_set(rmse, rsq, mae),
+  control = control_grid(save_pred = TRUE)
+)
+
+autoplot(model_params)
+
+```
+
+Based on this, I see that
+
+# 6. check the skills of the tuned model
+
+```{r}
+collect_metrics(model_params)
+```
+
+Based off what I see,
+
+```{r}
+show_best(model_params, metric = "mae")
+
+```
+
+# 7. Finalize your model
+
+```{r}
+best_mae <- select_best(model_params, metric = "mae")
+final_wf <- finalize_workflow( xgb_workflow, best_mae)
+```
+
+# 8. Final Model Verification
+
+```{r}
+final_fit <- last_fit(final_wf, split = camels_split) # fit the model using last_fit()
+collect_metrics(final_fit) #evaluate model using collect_metrics()
+```
+
+Based on the final model fit, the final model performed better than the training data
+
+```{r}
+test_predictions <- collect_predictions(final_fit) #Use the collect_predictions() function to check the predictions of the final model on the test data
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(test_predictions, aes(x = q_mean, y = .pred)) +
+  geom_point(color = "#1f77b4", alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "#ff7f0e", linetype = "dashed") +
+  geom_abline(slope = 1, intercept = 0, color = "gray30", linetype = "dotted") +
+  labs(
+    title = "Predicted vs Actual q_mean on Test Set",
+    x = "Actual q_mean",
+    y = "Predicted q_mean"
+  ) +
+  theme_minimal() +
+  scale_color_viridis_d()
+
+```
+
+# Building a map
+
+```{r}
+final_model_fit <- fit(final_wf, data = camels_clean) #fit the final model to the full data set
+library(broom)
+predicted_all <- augment(final_model_fit, new_data = camels_clean) # Make predictions across full data using augment()
+predicted_all <- predicted_all %>% #calculate residuals
+  mutate(residual = (.pred - q_mean)^2) 
+library(ggplot2)
+# make prediction map
+
+```
