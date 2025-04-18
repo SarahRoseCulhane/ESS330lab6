@@ -47,8 +47,6 @@ Then, I cleaned and explored the data to ensure that it is a good fit for modeli
 # Initial cleaning: remove NA rows and filter out incomplete cases
 camels_clean <- camels %>%
   drop_na(q_mean)
-# Skim for EDA
-skim(camels_clean)
 # remove remaining missing values
 camels_clean <- camels_clean %>%
   drop_na()
