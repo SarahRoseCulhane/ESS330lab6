@@ -4,9 +4,13 @@ author: "Sarah Culhane"
 editor: visual
 ---
 
+
+
 Lab 8: Machine Learning
 
 First, I loaded the necessary libraries
+
+
 
 ```{r}
 library(tidyverse)
@@ -21,9 +25,13 @@ library(ggpubr)
 
 ```
 
+
+
 **Data Import/Tidy/Transform**
 
 First, I read in the data using map, `map`, `read_delim()` and `powerjoin::power_full_join().`
+
+
 
 ```{r}
 #download all data and PDF
@@ -41,7 +49,11 @@ camels <- map(local_files, read_delim, show_col_types = FALSE)
 camels <- power_full_join(camels ,by = 'gauge_id')
 ```
 
+
+
 Then, I cleaned and explored the data to ensure that it is a good fit for modeling.
+
+
 
 ```{r}
 # Initial cleaning: remove NA rows and filter out incomplete cases
@@ -56,9 +68,13 @@ ggdensity(camels_clean$q_mean,
           xlab = "q_mean")
 ```
 
+
+
 # Data Splitting
 
 Then, I split the data into a training and testing set
+
+
 
 ```{r}
 set.seed(123)
@@ -70,9 +86,13 @@ camels_train <- training(camels_split)
 camels_test <- testing(camels_split)
 ```
 
+
+
 # Feature Engineering
 
 Then, I created a recipe
+
+
 
 ```{r}
 library(tidymodels)
@@ -90,9 +110,13 @@ baked_data <- prep(rec, camels_train) |>
   bake(new_data = NULL)
 ```
 
+
+
 # Resampling and Model Testing
 
 1.  Build resamples
+
+
 
     ```{r}
     set.seed(123)
@@ -100,7 +124,11 @@ baked_data <- prep(rec, camels_train) |>
 
     ```
 
+
+
 2.  Build Candidate Models
+
+
 
     ```{r}
     lm_model <- linear_reg(penalty = 0.1, mixture = 0) %>%
@@ -116,9 +144,13 @@ baked_data <- prep(rec, camels_train) |>
 
     ```
 
+
+
 <!-- -->
 
 2.  Test the models
+
+
 
 ```{r}
 models <- list(
@@ -142,6 +174,8 @@ autoplot(wf_results) #use auotplot to visualize the results of the workflow set
 rank_results(wf_results, rank_metric = "rsq", select_best = TRUE)
 ```
 
+
+
 4\. Model Selection
 
 Based on the visualized metrics, I am going to use the random forest model. This model outperformed the other models, ranking as the number one model when using the rank_results() function and the autoplot function. Looking at it, it also had the highest rsq. and the lowest rmse, supporting the outputted table. 
@@ -149,6 +183,8 @@ Based on the visualized metrics, I am going to use the random forest model. This
 # Model Tuning
 
 1.  Build a model for chosen specification
+
+
 
     ```{r}
 library(tidymodels)
@@ -163,7 +199,11 @@ rf_model_tune <- rand_forest(
 
     ```
 
+
+
 2.  Create a workflow
+
+
 
     ```{r}
    wf_tune <- workflow() %>%
@@ -172,11 +212,15 @@ rf_model_tune <- rand_forest(
 
     ```
 
+
+
     I created a workflow
 
 3.  Check the Tunable Values/Ranges
 
     first, I extracted the tunable parameters. Then I used the dials\$object slot to see the tunable parameters and their ranges
+
+
 
     ```{r}
   dials <- extract_parameter_set_dials(wf_tune)
@@ -184,7 +228,11 @@ dials$object  # View the ranges and types of each parameter
 
     ```
 
+
+
 #    4. Define the Search Space
+
+
 
 ```{r}
 # Assuming your outcome is q_mean
@@ -198,7 +246,11 @@ my.grid <- grid_latin_hypercube(
 )
 ```
 
+
+
 # 5. Tune the model
+
+
 
 ```{r}
 model_params <- tune_grid(
@@ -214,29 +266,45 @@ autoplot(model_params)  # Visualize model performance across the grid
 
 ```
 
+
+
 Based on this, I see that
 
 # 6. check the skills of the tuned model
+
+
 
 ```{r}
 collect_metrics(model_params)
 ```
 
+
+
 Based off what I see,
+
+
 
 ```{r}
 show_best(model_params, metric = "mae")
 
 ```
 
+
+
 # 7. Finalize your model
+
+
 
 ```{r}
 best_mae <- select_best(model_params, metric = "mae")
 final_wf <- finalize_workflow(wf_tune, best_mae)
 ```
 
+
+
 # 8. Final Model Verification
+
+
 
 ```{r}
 # Fit the final model to the training data and validate it on the test data
@@ -248,7 +316,11 @@ final_results <- last_fit(
 
 ```
 
+
+
 Based on the final model fit, the final model performed worse than the training model set. It has a lower rsq and higher rsme.
+
+
 
 ```{r}
 # Collect metrics for the final model
@@ -258,6 +330,7 @@ final_metrics <- collect_metrics(final_results)
 final_metrics
 
 ```
+
 ```{r}
 # Collect predictions for the final model on the test data
 final_predictions <- collect_predictions(final_results)
@@ -266,7 +339,11 @@ final_predictions <- collect_predictions(final_results)
 head(final_predictions)
 
 ```
+
+
 # building a map
+
+
 ```{r}
 library(ggplot2)
 
@@ -284,7 +361,11 @@ ggplot(final_predictions, aes(x = .pred, y = logQmean)) +
 
 ```
 
+
+
 # Building a map
+
+
 
 ```{r}
 final_model_fit <- fit(final_wf, data = camels_clean) #fit the final model to the full data set
@@ -295,7 +376,11 @@ predicted_all <- predicted_all %>% #calculate residuals
 library(ggplot2)
 ```
 
+
+
 Now, I will create maps
+
+
 
 ```{r}
 library(ggplot2)
@@ -338,3 +423,4 @@ map_predictions + map_residuals
 
 
 ```
+
