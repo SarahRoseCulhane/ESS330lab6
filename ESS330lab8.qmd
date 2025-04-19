@@ -2,6 +2,9 @@
 title: "hyperparameter-tuning"
 author: "Sarah Culhane"
 editor: visual
+format: html
+execute:
+ echo: true
 ---
 
 Lab 8: Machine Learning
@@ -41,14 +44,19 @@ camels <- map(local_files, read_delim, show_col_types = FALSE)
 camels <- power_full_join(camels ,by = 'gauge_id')
 ```
 
-Then, I cleaned and explored the data to ensure that it is a good fit for modeling.
+First, I visualized the data
 
 ```{r}
-# Initial cleaning: remove NA rows and filter out incomplete cases
-camels_clean <- camels %>%
-  drop_na(q_mean)
+visdat::vis_dat(camels)
+```
+```{r}
+skimr::skim(camels)
+```
+Then, I cleaned the data and did a quick visualization of q_mean
+
+```{r}
 # remove remaining missing values
-camels_clean <- camels_clean %>%
+camels_clean <- camels %>%
   drop_na()
 # keep guage_lat and guage_lon for later
 camels_clean <- camels_clean %>%
@@ -62,15 +70,18 @@ ggdensity(camels_clean$q_mean,
 
 # Data Splitting
 
-Then, I split the data into a training and testing set
+Then, I split the data into a training and testing set and built resamples using the vfold_cv() function to generate 10 k-fold samples for cross-validation.
 
 ```{r}
 set.seed(123)
-camels_clean <- camels_clean 
+camels_clean <- camels_clean %>%
+  mutate(logQmean = log(q_mean))
 
 camels_split <- initial_split(camels_clean, prop = 0.8)
 camels_train <- training(camels_split)
 camels_test <- testing(camels_split)
+
+camels_cv <- vfold_cv(camels_train, v = 10)
 ```
 
 # Feature Engineering
@@ -88,19 +99,15 @@ rec <-  recipe(q_mean ~ aridity + p_mean, data = camels_train) %>%
   step_interact(terms = ~ aridity:p_mean) |> 
   # Drop any rows with missing values in the pred
   step_naomit(all_predictors(), all_outcomes())
+
+#Bake Data
+baked_data <- prep(rec, camels_train) %>%
+  bake(new_data = NULL)
 ```
 
 # Resampling and Model Testing
 
-1.  Build resamples
-
-    ```{r}
-    set.seed(123)
-    camels_cv <- vfold_cv(camels_train, v = 10)
-
-    ```
-
-2.  Build Candidate Models
+1.  Build Candidate Models
 
     ```{r}
   # Linear regression model
@@ -120,44 +127,58 @@ xgb_mod <- boost_tree(trees = 500, learn_rate = 0.1) %>%
 
     ```
 
-
-
-3.  Test the models
+2. define workflows
 
 ```{r}
-# Create a named list of models
-model_list <- list(
-  linear_regression = lin_mod,
-  random_forest = rf_mod,
-  boosted_tree = xgb_mod
-)
+# Random Forest Workflow
+rf_workflow <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(rf_mod)
 
-# Create the workflow set
-wf_set <- workflow_set(
-  preproc = list(rec),
-  models = model_list
-)
+#Boosted tree model
+xgb_workflow <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model (xgb_mod)
 
-# Fit models across resamples
-set.seed(123)
-wf_results <- wf_set %>%
-  workflow_map(resamples = camels_cv, metrics = metric_set(rmse, rsq), seed = 123)
+#linear regression model
+lin_workflow <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(lin_mod)
 ```
-Then, I used autoplot ot visualize the results of the workflow set
-```{r}
-autoplot(wf_results)
 
+Then, I tested the models
+```{r}
+my_metrics <- metric_set(rmse, rsq, mae)
+
+wf_set <- workflow_set(
+  preproc = list(my_recipe = rec),
+  models = list(
+    xgboost = xgb_mod,
+    random_forest = rf_mod,
+    linear_reg = lin_mod
+  )
+)  
+    
+wf_results <- wf_set %>%
+  workflow_map(
+    "fit_resamples",
+    resamples = camels_cv,
+    metrics = my_metrics,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+autoplot(wf_results)
 ```
 
 4\. Model Selection
 
-Based on the visualized metrics, I am going to use the random forest model. This model outperformed the other models, ranking as the number one model when using the rank_results() function and the autoplot function. Looking at it, it also had the highest rsq. and the lowest rmse, supporting the outputted table. The model I selected is an ensemble learning method model type with multiple engine types. The most popular ones are the randomForest engine and the Ranger engine. The two common modes are classification and regression. For this one, I am using regression.
+Based on the visualized metrics, I am going to use the random forest model. This model outperformed the other models, ranking as the number one model when using the rank_results() function and the autoplot function. Looking at it, it also had the highest rsq. and the lowest rmse, supporting the outputted table. The model I selected is an ensemble learning method model type with multiple engine types. The most popular ones are the randomForest engine and the Ranger engine. For the purpose of this exercise, I am going to ue the ranger engine. The two common modes are classification and regression. For this one, I am using regression. I think the randomforest model is performing well it is good at handling non-linear relationships, and streamflow probably does not have a linear relationship with predictors like aridity and precipitation
 
 # Model Tuning
 
 1.  Build a model for chosen specification
 
-    ```{r}
+```{r}
 # Define a tunable random forest model
 rf_tune_mod <- rand_forest(
   mtry = tune(),
@@ -165,41 +186,37 @@ rf_tune_mod <- rand_forest(
 ) %>%
   set_engine("ranger") %>%
   set_mode("regression")
-
-
-    ```
+```
+I used the code abovee to build a model. The hyperparameters I chose to tune are mtry and min_n. The metry hyperparameters referrs to the number of variables randomly sampled as candidates at each split and the min_n hyperparameter is an integer for the minimum number of data points in a node that are required for the node to be split further.
 
 2.  Create a workflow
 
-    ```{r}
+```{r}
   # Build a workflow with the tunable random forest model and the recipe
 rf_tune_workflow <- workflow() %>%
   add_model(rf_tune_mod) %>%
   add_recipe(rec)
+```
 
-    ```
-
-    I created a workflow
+I used the code above to create a workflow.
 
 3.  Check the Tunable Values/Ranges
 
-    first, I extracted the tunable parameters. Then I used the dials\$object slot to see the tunable parameters and their ranges
+first, I extracted the tunable parameters. Then I used the dials\$object slot to see the tunable parameters and their ranges
 
-    ```{r}
+```{r}
 # Extract tunable parameter set from the workflow
 dials <- extract_parameter_set_dials(rf_tune_workflow)
 
 # View the parameters and their default ranges
 dials$object 
-
-    ```
-
+```
 #    4. Define the Search Space
 
 ```{r}
 # Finalize the mtry and min_n parameters
 rf_params <- parameters(
-  mtry(),
+  mtry(range = c(1L, 3L)),
   min_n()
 )
 
@@ -207,13 +224,9 @@ rf_params <- parameters(
 rf_params <- finalize(rf_params, training(camels_split))  # Replace camels_split with your training data
 
 # Generate a space-filling grid of hyperparameters (size = 25 combinations)
-grid_values <- grid_space_filling(
-  rf_params,
-  size = 25
-)
-
-
+my_grid <- grid_space_filling(rf_params, size = 25)
 ```
+When I tried to use grid_latin_hypercute(), Rstudio gave me the following error message: "Warning: `grid_latin_hypercube()` was deprecated in dials 1.3.0.Please use `grid_space_filling()`" so I used the grid_space_filling function instead. I was also unsure of what to put for dial size. The instructions on the lab said 20 but the rubric said 25 so I just whent with 25.
 
 # 5. Tune the model
 
@@ -221,16 +234,14 @@ grid_values <- grid_space_filling(
 model_params <-  tune_grid(
     rf_tune_workflow,
     resamples = camels_cv,
-    grid = my.grid,
+    grid = my_grid,
     metrics = metric_set(rmse, rsq, mae),
     control = control_grid(save_pred = TRUE)
   )
 
 autoplot(model_params)
-
 ```
-
-Based on this, I see that
+Based on this, I see that only having 1 randomly selected predictor producer the best result. This makes sense because I only have one predictor in my recipe and did chose the mtry hyperparameter. Now I know that was maybe not the best hyperparameter to go with but at this point I am going to stick with it. As for the minimal mode size, I see that as the number of nodes increase, the rsq goes down and the rmse and mae goes up, which tells me that the best node size is going to be somewhere in the lower range.
 
 # 6. check the skills of the tuned model
 ```{r}
@@ -239,16 +250,16 @@ model_metrics <- collect_metrics(model_params)
 
 # View the collected metrics
 model_metrics
-
 ```
-I used the code above to collect_metrics() function to check the skill of the tuned model.Based off what I see,
+When I used the collect_metrics() function, I see a 54x8 tibble with different combonations of mtry and min_n, the hyperparameters I chose to tune for my model. I also see the different metrics; mae, rsq, and rmse, and the resulting statistics. The only value for mtry I am getting is one, which, again, makes sense because my recipe did only use one predictor. 
 
 ```{r}
 # Show the best model based on MAE
 show_best(model_params, metric = "mae")
 
 ```
-I used the code above to Use the show_best() function to show the best performing model based on Mean Absolute Error.
+I used the code above to Use the show_best() function to show the best performing hyperparameter set for my model based on Mean Absolute Error. The best performing hyperparameter set, based on this table, is the one with a mtry of 1 and a min_n of 11.
+
 ```{r}
 # Select the best hyperparameter set
 hp_best <- select_best(model_params, metric = "mae")
@@ -257,7 +268,7 @@ hp_best <- select_best(model_params, metric = "mae")
 hp_best
 
 ```
-I used the code above to save the best performing hyperparameter set to an object called hp_best.
+I used the code above to save the best performing hyperparameter set to an object called hp_best.It looks like the best model has a mtry of one ad a min_n of 13
 
 # 7. Finalize your model
 
@@ -278,20 +289,19 @@ final_rf_model <- fit(final_rf_workflow, data = training(camels_split))  # Repla
 final_rf_model
 
 ```
+I ran finalize_workflow() to create a final workflow object
 
 # 8. Final Model Verification
 
 ```{r}
-# Fit the final model to the training data and validate it on the test data
+# use last_fit() to fit the final model to the training data and validate it on the test data
 final_results <- last_fit(
-  final_wf,
-  split = camels_split,  # The result from initial_split()
+  final_rf_workflow,
+  split = camels_split, 
   metrics = metric_set(rmse, rsq, mae)  # Metrics for evaluation
 )
 
 ```
-
-Based on the final model fit, the final model performed worse than the training model set. It has a lower rsq and higher rsme.
 
 ```{r}
 # Collect metrics for the final model
@@ -301,6 +311,8 @@ final_metrics <- collect_metrics(final_results)
 final_metrics
 
 ```
+Based on the final model fit, the final model performed worse than the training model set. It has a slightly lower rsq and higher rsme.
+
 ```{r}
 # Collect predictions for the final model on the test data
 final_predictions <- collect_predictions(final_results)
@@ -308,76 +320,54 @@ final_predictions <- collect_predictions(final_results)
 # View the first few predictions to make sure the object was created
 head(final_predictions)
 
+final_fit_ful <- fit(final_rf_workflow, data = camels_clean)
 ```
-# building a map
+Looking at this table, the .pred object was created successfully.
+
+# plot predicted vs actual
 ```{r}
 library(ggplot2)
 
-ggplot(final_predictions, aes(x = .pred, y = logQmean)) +
-  geom_point(aes(color = logQmean)) +  # Scatter plot of predictions vs actuals
-  geom_smooth(method = "lm", se = FALSE, color = "blue") +  # Linear fit
-  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +  # 1:1 line
-  scale_color_viridis_c() +  # Color palette
+ggplot(final_predictions, aes(x = .pred, y = q_mean)) +
+  geom_point(color = "red", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
   labs(
-    title = "Predicted vs Actual Values",
-    x = "Predicted Values",
-    y = "Actual Values"
+    title = "predicted vs actual values",
+    x = "predicted",
+    y = "actual"
   ) +
   theme_minimal()
 
 ```
 
-# Building a map
-
-```{r}
-final_model_fit <- fit(final_wf, data = camels_clean) #fit the final model to the full data set
-library(broom)
-predicted_all <- augment(final_model_fit, new_data = camels_clean) # Make predictions across full data using augment()
-predicted_all <- predicted_all %>% #calculate residuals
-  mutate(residual = (.pred - logQmean)^2) 
-library(ggplot2)
-```
-
-Now, I will create maps
+Now, I will two different maps. One will be of predicted q_mean and the other will be of residuals.
 
 ```{r}
 library(ggplot2)
 library(sf)
 
-# Assuming you have a spatial column 'geometry' in your data
-ggplot(predicted_all) +
-  geom_sf(aes(fill = .pred)) +  # Color the map based on predictions
-  scale_fill_viridis_c() +  # Color palette for fill
-  labs(title = "Predicted Values Across CONUS") +
+predictions_all <- augment(final_fit_ful, new_data = camels_clean)
+
+predictions_all <- predictions_all %>%
+  mutate(residual = (q_mean -.pred))
+
+pred_map <- ggplot(predictions_all, aes(x = gauge_lon, y = gauge_lat, color = .pred)) +
+  geom_point(size = 2) +
+  scale_color_viridis_c(name = "predicted") +
+  labs(title = "predicted q_mean") +
+  coord_fixed() +
   theme_minimal()
 
-# Add residuals (difference between truth and predictions)
-predicted_all <- predicted_all %>%
-  mutate(residuals = logQmean - .pred)
-
-ggplot(predicted_all) +
-  geom_sf(aes(fill = residuals)) +  # Color the map based on residuals
-  scale_fill_viridis_c() +  # Color palette for residuals
-  labs(title = "Residuals Across CONUS") +
+resid_map <- ggplot(predictions_all, aes(x = gauge_lon, y = gauge_lat, color = residual)) +
+  geom_point(size = 2) +
+  scale_color_viridis_c(name = "Residuals") +
+  labs(title = "residuals") +
+  coord_fixed() +
   theme_minimal()
-
 library(patchwork)
 
-# Create two separate maps
-map_predictions <- ggplot(predicted_all) +
-  geom_sf(aes(fill = .pred)) + 
-  scale_fill_viridis_c() + 
-  labs(title = "Predictions Across CONUS") +
-  theme_minimal()
-
-map_residuals <- ggplot(predicted_all) +
-  geom_sf(aes(fill = residuals)) + 
-  scale_fill_viridis_c() + 
-  labs(title = "Residuals Across CONUS") +
-  theme_minimal()
-
-# Combine the maps
-map_predictions + map_residuals
-
+pred_map + resid_map
+  
 
 ```
